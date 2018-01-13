@@ -18,6 +18,7 @@
 #include <Winsock2.h>
 static inline int poll( struct pollfd *pfd, int nfds, int timeout) { return WSAPoll ( pfd, nfds, timeout ); }
 #else
+#include <unistd.h>
 #include <poll.h>
 #endif
 

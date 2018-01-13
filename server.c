@@ -1,97 +1,128 @@
 #include "server.h"
 #include "buffer.h"
-#include <unistd.h>
 
+static int servers[4];
 static int *clients = NULL;
+static size_t servers_cnt = 0;
 static size_t clients_cnt = 0;
 
 static int sock_tcp4, sock_udp4, sock_tcp6, sock_udp6;
+
+static const char *proto_str(int af, int proto)
+{
+    switch(af)
+    {
+    case AF_INET:
+        switch(proto)
+        {
+        case IPPROTO_TCP: return "TVPv4";
+        case IPPROTO_UDP: return "UDPv4";
+        default: return "???";
+        }
+    case AF_INET6:
+        switch(proto)
+        {
+        case IPPROTO_TCP: return "TVPv6";
+        case IPPROTO_UDP: return "UDPv6";
+        default: return "???";
+        }
+    default: return "???";
+    }
+}
+
+static int create_server(uint16_t port, int af, int type, int proto)
+{
+    int sock = -1, optval = 1;
+    struct sockaddr_in saddr4;
+    struct sockaddr_in6 saddr6;
+    struct sockaddr *saddr = NULL;
+    size_t saddr_size = 0;
+
+    sock = socket(af, type, proto);
+    if(sock < 0)
+    {
+        warnf("Could not create socket %s\n", proto_str(af, proto));
+        return -1;
+    }
+
+    switch(af)
+    {
+    case AF_INET:
+        memset(&saddr4, 0, sizeof(saddr4));
+        setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+        set_blocking_mode(sock, false);
+        saddr4.sin_family = AF_INET;
+        saddr4.sin_port = htons(port);
+        saddr = (struct sockaddr*)&saddr4;
+        saddr_size = sizeof(saddr4);
+        break;
+
+    case AF_INET6:
+        memset(&saddr6, 0, sizeof(saddr6));
+        setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+        setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, &optval, sizeof(optval));
+        set_blocking_mode(sock, false);
+        saddr6.sin6_family = AF_INET6;
+        saddr6.sin6_port = htons(port);
+        saddr = (struct sockaddr*)&saddr6;
+        saddr_size = sizeof(saddr6);
+        break;
+
+    default:
+        close(sock);
+        return -1;
+    }
+
+
+    errno = 0;
+    if(bind(sock, saddr, (socklen_t)saddr_size) < 0)
+    {
+        close(sock);
+        warnf("Could not bind socket %s\n", proto_str(af, proto));
+        return -1;
+    }
+
+    if(proto == IPPROTO_TCP)
+    {
+        errno = 0;
+        if(listen(sock, 10) < 0)
+        {
+            close(sock);
+            warnf("Could not listen on socket %s: %s\n", proto_str(af, proto), strerror(errno));
+            return -1;
+        }
+    }
+
+    logf("Started %s\n", proto_str(af, proto));
+    return sock;
+}
 
 int start_server(args_server *args)
 {
     logf("Running on localhost:%" PRIu16 "\n", args->port);
 
+    memset(servers, 0, sizeof(servers));
+    servers_cnt = 0;
+
+    free(clients);
+    clients = malloc(sizeof(int) * 1024);
+    clients_cnt = 0;
+
     const int optval = 1;
-    struct sockaddr_in saddr_tcp4, saddr_udp4;
-    struct sockaddr_in6 saddr_tcp6, saddr_udp6;
 
-    memset(&saddr_tcp4, 0, sizeof(saddr_tcp4));
-    memset(&saddr_udp4, 0, sizeof(saddr_udp4));
-    memset(&saddr_tcp6, 0, sizeof(saddr_tcp6));
-    memset(&saddr_udp6, 0, sizeof(saddr_udp6));
+    servers_cnt += ((servers[servers_cnt] = (sock_tcp4 = create_server(args->port, AF_INET, SOCK_STREAM, IPPROTO_TCP))) != -1);
+    servers_cnt += ((servers[servers_cnt] = (sock_tcp6 = create_server(args->port, AF_INET6, SOCK_STREAM, IPPROTO_TCP))) != -1);
+    servers_cnt += ((servers[servers_cnt] = (sock_udp4 = create_server(args->port, AF_INET, SOCK_DGRAM, IPPROTO_UDP))) != -1);
+    servers_cnt += ((servers[servers_cnt] = (sock_udp6 = create_server(args->port, AF_INET6, SOCK_DGRAM, IPPROTO_UDP))) != -1);
 
-    sock_tcp4 = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    sock_udp4 = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    sock_tcp6 = socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
-    sock_udp6 = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
+    logf("Started %zu/4 servers.\n", servers_cnt);
 
-    if( sock_tcp4 == -1 ||
-        sock_udp4 == -1 ||
-        sock_tcp6 == -1 ||
-        sock_udp6 == -1 )
+    while(true)
     {
-        logf("%s\n", "sockets could not be created.");
-        return 1;
+        /*
+         * server polling for inbound connections from a reverse client
+         */
     }
-
-    // TODO: error checking for all of these
-    setsockopt(sock_tcp4, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
-    setsockopt(sock_udp4, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
-    setsockopt(sock_tcp6, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
-    setsockopt(sock_udp6, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
-
-    // explicitly use IPv6 for highest amount of portability (and annoyance)
-    setsockopt(sock_tcp6, IPPROTO_IPV6, IPV6_V6ONLY, &optval, sizeof(optval));
-    setsockopt(sock_udp6, IPPROTO_IPV6, IPV6_V6ONLY, &optval, sizeof(optval));
-
-    set_blocking_mode(sock_tcp4, false);
-    set_blocking_mode(sock_udp4, false);
-    set_blocking_mode(sock_tcp6, false);
-    set_blocking_mode(sock_udp6, false);
-
-    saddr_tcp4.sin_family = AF_INET;
-    saddr_udp4.sin_family = AF_INET;
-    saddr_tcp6.sin6_family = AF_INET6;
-    saddr_udp6.sin6_family = AF_INET6;
-
-    saddr_tcp4.sin_port = htons(args->port);
-    saddr_udp4.sin_port = htons(args->port);
-    saddr_tcp6.sin6_port = htons(args->port);
-    saddr_udp6.sin6_port = htons(args->port);
-
-    if(bind(sock_tcp4, (struct sockaddr*)&saddr_tcp4, sizeof(saddr_tcp4)) < 0)
-    {
-        warnf("%s\n", "Could not listen on TVPv4");
-        close(sock_tcp4);
-        sock_tcp4 = -1;
-    }
-    listen(sock_tcp4, 10);
-
-    if(bind(sock_udp4, (struct sockaddr*)&saddr_udp4, sizeof(saddr_udp4)) < 0)
-    {
-        warnf("%s\n", "Could not listen on UDPv4");
-        close(sock_udp4);
-        sock_udp4 = -1;
-    }
-    listen(sock_udp4, 10);
-
-    if(bind(sock_tcp6, (struct sockaddr*)&saddr_tcp6, sizeof(saddr_tcp6)) < 0)
-    {
-        warnf("%s\n", "Could not listen on TCPv6");
-        close(sock_tcp6);
-        sock_tcp6 = -1;
-    }
-    listen(sock_tcp6, 10);
-
-    if(bind(sock_udp6, (struct sockaddr*)&saddr_udp6, sizeof(saddr_udp6)) < 0)
-    {
-        warnf("%s\n", "Could not listen on UDPv6");
-        close(sock_udp6);
-        sock_udp6 = -1;
-    }
-    listen(sock_udp6, 10);
-
-    sleep(1000);
 
     return 0;
 }
