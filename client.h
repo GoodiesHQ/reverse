@@ -1,8 +1,13 @@
 #ifndef REVERSE_CLIENT_H
 #define REVERSE_CLIENT_H
 
-#include "common.h"
+#include "reverse.h"
 
-int start_client();
+typedef struct {
+    char **targets;
+    size_t targets_cnt;
+} args_client;
+
+int start_client(args_client *args);
 
 #endif

@@ -1,8 +1,12 @@
 #ifndef REVERSE_SERVER_H
 #define REVERSE_SERVER_H
 
-#include "common.h"
+#include "reverse.h"
 
-int start_server();
+typedef struct {
+    uint16_t port;
+} args_server;
+
+int start_server(args_server *args);
 
 #endif

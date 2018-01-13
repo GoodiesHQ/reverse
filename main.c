@@ -30,6 +30,10 @@ int main(int argc, char **argv) {
 
     if(strncmp(CLIENT_STR, argv[1], modelen) == 0)
     {
+        if(argc < 3)
+        {
+            return usage(argv[0]);
+        }
         logf("%s\n", "Running in Client mode.");
         mode = REVERSE_MODE_CLIENT;
     }
@@ -40,13 +44,17 @@ int main(int argc, char **argv) {
         mode = REVERSE_MODE_SERVER;
     }
 
-    switch(mode)
+    if(mode == REVERSE_MODE_INVALID)
     {
-        case REVERSE_MODE_CLIENT:
-            return start_client();
-        case REVERSE_MODE_SERVER:
-            return start_server();
-        default:
-            return usage(argv[0]);
+        return usage(argv[0]);
     }
+
+    void *args = reverse_parse_args(argv + 2, (size_t)argc - 2, mode);
+
+    if(args == NULL)
+    {
+        return usage(argv[0]);
+    }
+
+    return mode == REVERSE_MODE_CLIENT ? start_client(args) : start_server(args);
 }
